@@ -7,7 +7,7 @@
 RF24 radio(9, 10);
 const byte address[6] = "00152";
 
-const int fputchar(const char ch, FILE *stream) { 
+const int fputchar(const char ch, FILE *stream) {
   Serial.write(ch);
   return ch;
 }
@@ -27,10 +27,12 @@ void setup() {
 
   radio.begin();
   radio.openWritingPipe(address);
+  radio.openReadingPipe(1, address);
   radio.setPALevel(RF24_PA_MAX);
   radio.stopListening();
 
   pinMode(8, INPUT_PULLUP);
+
   loadCalibrationPoints();
 
   Serial.println("Ожидание");
@@ -97,32 +99,51 @@ void loop() {
 }
 
 void sendto() {
+  radio.stopListening();
   ok = radio.write(&res, sizeof(res));
-  while (!ok) { 
+  
+  radio.startListening();
+  
+  unsigned long startWait = millis();
+  bool replyReceived = false;
+
+  while (millis() - startWait < 500) {
+    if (radio.available()) {
+      payload reply;
+      radio.read(&reply, sizeof(reply));
+      replyReceived = true;
+      break;
+    }
+    delay(5);
+  }
+
+  if (!replyReceived) {
     sendAttempt++;
-    ok = radio.write(&res, sizeof(res));
     if (sendAttempt >= 10) {
-      printf("Connection lost. Reconnecting... (attempt: %d)\n", sendAttempt);
+      printf("Connection lost. No Reply. (attempt: %d)\n", sendAttempt);
     }
     if (sendAttempt >= 500) {
       printf("FAIL! Resetting...\n");
       sendAttempt = 0;
       mode = 0;
-      break;
     }
-    delay(10);
+    radio.stopListening(); 
+  } else {
+    sendAttempt = 0;
+    radio.stopListening();
   }
-  sendAttempt = 0;
   ok = false;
 }
 
 void loadCalibrationPoints() {
   const int START_ADDR_X = 0;   
-  const int START_ADDR_Y = 72;
-  for (int i = 0; i < 36; i++) { 
+  const int START_ADDR_Y = 72;  
+
+  for (int i = 0; i < 36; i++) {
     int tempX; 
-    int tempY;
-    EEPROM.get(START_ADDR_X + i * 2, tempX);
+    int tempY;  
+
+    EEPROM.get(START_ADDR_X + i * 2, tempX);  
     EEPROM.get(START_ADDR_Y + i * 2, tempY);  
 
     posesx[i] = tempX;
@@ -136,7 +157,6 @@ void mv(int x, int y) {
   res.xpos = x;
   res.ypos = y;
 }
-
 void led(int value) {
   res.state = value;
 }
